@@ -94,6 +94,39 @@ export async function POST(req: Request) {
       </div>
     `
 
+    // Forward the same submission into RVM CRM as a Lead (Lead Management ->
+    // Web Enquiries), alongside the email notification below. Best-effort and
+    // non-blocking: a CRM outage should never stop the visitor's "thank you"
+    // response or the email notification from going out.
+    const crmApiBase = process.env.CRM_API_BASE_URL
+    const crmApiKey = process.env.CRM_WEB_FORM_API_KEY
+    if (crmApiBase && crmApiKey) {
+      try {
+        const crmRes = await fetch(`${crmApiBase.replace(/\/$/, "")}/public/web-leads`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: crmApiKey,
+            fullName,
+            email: email || undefined,
+            phoneNumber: phone || undefined,
+            company: company || undefined,
+            message: inquiryMessage,
+          }),
+        })
+        if (crmRes.ok) {
+          console.log(`✅ Lead forwarded to RVM CRM (Web Enquiries) for ${fullName}`)
+        } else {
+          const body = await crmRes.json().catch(() => null)
+          console.error(`⚠️ RVM CRM rejected the lead (${crmRes.status}):`, body?.message || crmRes.statusText)
+        }
+      } catch (crmError) {
+        console.error("⚠️ Failed to forward lead to RVM CRM:", crmError)
+      }
+    } else {
+      console.log("ℹ️ CRM_API_BASE_URL / CRM_WEB_FORM_API_KEY not set - skipping RVM CRM forward.")
+    }
+
     // If SMTP credentials exist, send email via nodemailer
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       const transporter = nodemailer.createTransport({
